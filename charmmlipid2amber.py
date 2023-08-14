@@ -4,7 +4,7 @@ import argparse
 
 import numpy as np
 import MDAnalysis as mda
-from MDAnalysis.core.universe import Merge
+from MDAnalysis.core.universe import Merge, Residue
 
 def head_group_conversion(charmm_head_group):
     if charmm_head_group == 'PA':
@@ -50,7 +50,8 @@ def chol(u):
     new_ag.residues.resnames = 'CHL'
     return new_ag.atoms, 'CHL'
 
-def lipid(u, resname):
+def lipid(u, resname, lipid_counter):
+    chain_id = "L" + str(lipid_counter)
     charmm_head_group = resname[2:]
     amber_head_group = head_group_conversion(charmm_head_group)
 
@@ -143,6 +144,7 @@ def lipid(u, resname):
 
     # acyl rail 2
     new_ag = []
+
     for name in ref.select_atoms('resid 3').names:
         ori_name = name
         if name[0] == 'C':
@@ -159,11 +161,29 @@ def lipid(u, resname):
     acyl_B = Merge(*new_ag)
     acyl_B.residues.resnames = amber_acyl_B
     acyl_B.residues.resids = 3
+#    res_id =  acyl_B.atoms[-1].resid
+#   acyl_B.add_Residue(acyl_B.segments[0], resid=res_id+1,resname="TER", resnum=0)
+
+    # add a TER
+   #ter = acyl_B.atoms[-1:]
+    """ter = mda.Universe.empty(1,
+                             n_residues=1,
+                             atom_resindex=(acyl_B.atoms[-1:].ids+1),
+                             trajectory=False)
+    ter.names = ["TER"]
+    print(ter.__dict__)
+    ter.residues.resids = 4
+    ter.atoms.positions = [0, 0, 0]
+    print(ter.atoms.ids)"""
     new = Merge(acyl_A.atoms, head_group.atoms, acyl_B.atoms)
+    chain_arr = [chain_id] * len(new.atoms)
+    new.atoms.chainIDs = chain_arr
+    if new.atoms.chainIDs[0] == "L1":
+        new.atoms.write("ter_check.pdb")
     assert len(new.atoms) == len(u.atoms)
     return new.atoms, '{}_{}_{}'.format(amber_acyl_A, amber_head_group, amber_acyl_B)
 
-def resname2lipid17(mol):
+def resname2lipid17(mol, lipid_counter):
     resname = mol.resnames
     assert len(np.unique(resname)) == 1
     resname = np.unique(resname)[0]
@@ -171,7 +191,7 @@ def resname2lipid17(mol):
     if resname == 'CHL1':
         return chol(mol)
     else:
-        return lipid(mol, resname)
+        return lipid(mol, resname, lipid_counter)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -183,11 +203,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args(sys.argv[1:])
 
+
+
     default_set = ['CHL1', 'DLPA', 'DLPC', 'DLPE', 'DLPG', 'DLPS', 'DMPA', 'DMPC', 'DMPE', 'DMPG', 'DMPS', 'DOPA',
                    'DOPC', 'DOPE', 'DOPG', 'DOPS', 'DPPA', 'DPPC', 'DPPE', 'DPPG', 'DPPS', 'DSPA', 'DSPC', 'DSPE',
                    'DSPG', 'DSPS', 'POPA', 'POPC', 'POPE', 'POPG', 'POPS', 'SOPA', 'SOPC', 'SOPE', 'SOPG', 'SOPS', ]
-    input_file = args.f[0]
-    output_file = args.o[0]
+    input_file = os.getcwd() + "/IFS1_membrane_90.pdb"                 #args.f[0]
+    output_file = "output.pdb"                                         #args.o[0]
     lipid_set = args.lipids
 
     if lipid_set == "charmm_membrane_builder":
@@ -197,18 +219,22 @@ if __name__ == '__main__':
     new_u = []
     previous_lipid = None
     warning_lipids = []
+    lipid_counter = 0
+
     for residue in u.residues:
         if residue.resname in lipid_set:
+            lipid_counter += 1
             if not residue.resname in default_set:
                 default_set.append(residue.resname)
                 print("Lipid {} requested hasn't been tested. Please manually check the conversion.".format(residue.resname))
 
-            new, new_name = resname2lipid17(residue.atoms)
+            new, new_name = resname2lipid17(residue.atoms, lipid_counter)
             new_u.append(new.atoms)
             if new_name != previous_lipid:
                 if not previous_lipid is None:
                     print(previous_lipid, count)
                 previous_lipid = new_name
+                print(previous_lipid)
                 count = 1
             else:
                 count += 1
@@ -216,7 +242,7 @@ if __name__ == '__main__':
             new_u.append(residue.atoms)
     print(previous_lipid, count)
     final = Merge(*new_u)
-    final.dimensions = u.dimensions
+    ter = final.select_atoms("name TER")
     final.atoms.write(output_file)
 
 
